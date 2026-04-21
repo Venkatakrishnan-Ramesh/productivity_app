@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../db/database_helper.dart';
 
 class StepService {
@@ -74,5 +75,51 @@ class StepService {
   String _todayStr() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Returns a list of 7 step counts (Mon–Sun) for the given week offset.
+  /// weekOffset 0 = current week, -1 = last week, etc.
+  Future<List<int>> getWeeklySteps(int weekOffset) async {
+    final now = DateTime.now();
+    // Find Monday of the current week
+    final todayMidnight = DateTime(now.year, now.month, now.day);
+    final currentWeekMonday =
+        todayMidnight.subtract(Duration(days: todayMidnight.weekday - 1));
+    // Apply offset (each offset unit = 7 days)
+    final targetMonday =
+        currentWeekMonday.add(Duration(days: weekOffset * 7));
+
+    final List<int> result = [];
+    for (int i = 0; i < 7; i++) {
+      final day = targetMonday.add(Duration(days: i));
+      final dateStr =
+          '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+      final record = await DatabaseHelper.instance.getStepRecord(dateStr);
+      result.add(record != null ? (record['steps'] as int) : 0);
+    }
+    return result;
+  }
+
+  /// Returns weekly stats for the current week:
+  /// - weeklyAvg: average steps per day (only days that have any steps)
+  /// - bestDay: highest step count in the week
+  /// - daysMetGoal: number of days where steps >= goal
+  Future<Map<String, dynamic>> getWeeklyStats() async {
+    final prefs = await SharedPreferences.getInstance();
+    final goal = prefs.getInt('step_goal') ?? 10000;
+
+    final steps = await getWeeklySteps(0);
+    final nonZero = steps.where((s) => s > 0).toList();
+
+    final double weeklyAvg =
+        nonZero.isEmpty ? 0.0 : nonZero.reduce((a, b) => a + b) / nonZero.length;
+    final int bestDay = steps.isEmpty ? 0 : steps.reduce(max);
+    final int daysMetGoal = steps.where((s) => s >= goal).length;
+
+    return {
+      'weeklyAvg': weeklyAvg,
+      'bestDay': bestDay,
+      'daysMetGoal': daysMetGoal,
+    };
   }
 }

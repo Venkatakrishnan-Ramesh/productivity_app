@@ -28,7 +28,8 @@ class PatternService {
     return (habits * 30 + steps * 25 + water * 25 + todos * 20).clamp(0, 100);
   }
 
-  Future<List<double>> getScoreTrend(int days) async {
+  /// Returns a list of daily life scores for the past [days] days (oldest first).
+  Future<List<double>> getScoreTrend({int days = 7}) async {
     final scores = <double>[];
     final now = DateTime.now();
     for (int i = days - 1; i >= 0; i--) {
@@ -46,6 +47,76 @@ class PatternService {
       'steps': await _stepsScore(today) * 100,
       'water': await _waterScore(today) * 100,
       'todos': await _todosScore(today) * 100,
+    };
+  }
+
+  // ── Lifetime Stats ──────────────────────────────────────────────────────
+
+  /// Returns aggregate lifetime stats from the database.
+  Future<Map<String, dynamic>> getLifetimeStats() async {
+    final dbInstance = await db.database;
+
+    // Total XP from user_stats
+    final xpRows = await dbInstance
+        .query('user_stats', where: 'key = ?', whereArgs: ['total_xp']);
+    final totalXp = xpRows.isEmpty ? 0 : (xpRows.first['value'] as int);
+
+    // Total habits completed (count of all habit_logs rows)
+    final habitCountRows =
+        await dbInstance.rawQuery('SELECT COUNT(*) as cnt FROM habit_logs');
+    final totalHabitsCompleted =
+        (habitCountRows.first['cnt'] as int? ?? 0);
+
+    // Best streak: compute per habit and take the max
+    final habits = await db.getHabits();
+    int bestStreak = 0;
+    for (final h in habits) {
+      final logs = await db.getLogsForHabit(h['id'] as String);
+      if (logs.isEmpty) continue;
+      final dates = logs
+          .map((l) => l['date'] as String)
+          .toSet()
+          .map((s) => DateTime.parse(s))
+          .toList()
+        ..sort();
+
+      int streak = 1;
+      int maxStreak = 1;
+      for (int i = 1; i < dates.length; i++) {
+        final diff = dates[i].difference(dates[i - 1]).inDays;
+        if (diff == 1) {
+          streak++;
+          if (streak > maxStreak) maxStreak = streak;
+        } else if (diff > 1) {
+          streak = 1;
+        }
+      }
+      if (maxStreak > bestStreak) bestStreak = maxStreak;
+    }
+
+    // Days tracked: distinct dates in step_records OR habit_logs
+    final daysRows = await dbInstance.rawQuery(
+        'SELECT COUNT(DISTINCT date) as cnt FROM habit_logs');
+    final stepDaysRows = await dbInstance
+        .rawQuery('SELECT COUNT(*) as cnt FROM step_records');
+    final habitDays = daysRows.first['cnt'] as int? ?? 0;
+    final stepDays = stepDaysRows.first['cnt'] as int? ?? 0;
+    final daysTracked = habitDays > stepDays ? habitDays : stepDays;
+
+    // Average score over tracked days (use last 30 days max for performance)
+    final lookback = daysTracked.clamp(1, 30);
+    final trendScores = await getScoreTrend(days: lookback);
+    final nonZero = trendScores.where((s) => s > 0).toList();
+    final avgScore = nonZero.isEmpty
+        ? 0.0
+        : nonZero.reduce((a, b) => a + b) / nonZero.length;
+
+    return {
+      'totalXp': totalXp,
+      'bestStreak': bestStreak,
+      'totalHabitsCompleted': totalHabitsCompleted,
+      'avgScore': avgScore,
+      'daysTracked': daysTracked,
     };
   }
 
@@ -377,7 +448,7 @@ class PatternService {
     }
 
     // Habit rate trend
-    final trend = await getScoreTrend(7);
+    final trend = await getScoreTrend(days: 7);
     if (trend.length == 7) {
       final firstHalf = trend.take(3).reduce((a, b) => a + b) / 3;
       final secondHalf = trend.skip(4).reduce((a, b) => a + b) / 3;

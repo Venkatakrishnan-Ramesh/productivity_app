@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/today_screen.dart';
 import 'screens/habit_screen.dart';
 import 'screens/finance_screen.dart';
 import 'screens/insights_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/assistant_screen.dart';
 import 'screens/steps_screen.dart';
 import 'screens/water_screen.dart';
 import 'services/notification_service.dart';
@@ -12,28 +15,30 @@ import 'services/step_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Load persisted theme preference before app starts
+  final prefs = await SharedPreferences.getInstance();
+  final savedThemeDark = prefs.getBool('theme_dark');
+
   try {
+    // init() now calls rescheduleFromPrefs() internally, so we only need
+    // to call the notifications that are NOT user-configurable here.
     await NotificationService.instance.init();
     await NotificationService.instance.requestPermission();
-    await NotificationService.instance.scheduleMorningBriefing();
-    await NotificationService.instance.scheduleEveningRecap();
-    await NotificationService.instance.scheduleBedtimeReminder();
-    await NotificationService.instance.scheduleWaterReminders();
     await NotificationService.instance.scheduleMidnightSummary();
-    await NotificationService.instance.scheduleDailyCheckin();
     await NotificationService.instance.showDailyCheckin();
-    await NotificationService.instance.scheduleFinanceSummary();
   } catch (_) {}
 
   try {
     await StepService.instance.init();
   } catch (_) {}
 
-  runApp(const ProductivityApp());
+  runApp(ProductivityApp(initialThemeDark: savedThemeDark));
 }
 
 class ProductivityApp extends StatefulWidget {
-  const ProductivityApp({super.key});
+  final bool? initialThemeDark;
+
+  const ProductivityApp({super.key, this.initialThemeDark});
 
   static _ProductivityAppState? of(BuildContext context) =>
       context.findAncestorStateOfType<_ProductivityAppState>();
@@ -43,10 +48,21 @@ class ProductivityApp extends StatefulWidget {
 }
 
 class _ProductivityAppState extends State<ProductivityApp> {
-  ThemeMode _themeMode = ThemeMode.system;
+  late ThemeMode _themeMode;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialThemeDark == null) {
+      _themeMode = ThemeMode.system;
+    } else {
+      _themeMode = widget.initialThemeDark! ? ThemeMode.dark : ThemeMode.light;
+    }
+  }
 
   void toggleTheme() => setState(() {
-        _themeMode = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+        _themeMode =
+            _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
       });
 
   bool get isDark => _themeMode == ThemeMode.dark;
@@ -82,7 +98,13 @@ class MainNav extends StatefulWidget {
 class _MainNavState extends State<MainNav> {
   int _index = 0;
 
-  final _titles = ['Briefing', 'Mission Control', 'Missions', 'Finance', 'Insights'];
+  final _titles = [
+    'Briefing',
+    'Mission Control',
+    'Missions',
+    'Finance',
+    'Insights'
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -101,9 +123,25 @@ class _MainNavState extends State<MainNav> {
               onPressed: () => _showHealthSheet(context),
             ),
           IconButton(
-            icon: Icon(app?.isDark == true ? Icons.light_mode : Icons.dark_mode),
-            tooltip: 'Toggle theme',
-            onPressed: () => app?.toggleTheme(),
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: 'Mini JARVIS',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AssistantScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SettingsScreen(
+                  isDark: app?.isDark == true,
+                  onThemeToggle: () => app?.toggleTheme(),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -163,7 +201,9 @@ class _MainNavState extends State<MainNav> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Health Tracking',
-                style: Theme.of(ctx).textTheme.titleLarge
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleLarge
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             ListTile(

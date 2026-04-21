@@ -15,13 +15,17 @@ class DatabaseHelper {
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
-    return await openDatabase(path, version: 4, onCreate: _createDB, onUpgrade: _upgradeDB);
+    return await openDatabase(path, version: 5, onCreate: _createDB, onUpgrade: _upgradeDB);
   }
 
   Future _createDB(Database db, int version) async {
     await db.execute('''CREATE TABLE habits (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, emoji TEXT NOT NULL,
-      xp INTEGER NOT NULL DEFAULT 10, created_at TEXT NOT NULL)''');
+      xp INTEGER NOT NULL DEFAULT 10, created_at TEXT NOT NULL,
+      category TEXT DEFAULT 'general',
+      difficulty INTEGER DEFAULT 1,
+      is_active INTEGER DEFAULT 1,
+      description TEXT DEFAULT '')''');
 
     await db.execute('''CREATE TABLE habit_logs (
       id TEXT PRIMARY KEY, habit_id TEXT NOT NULL, date TEXT NOT NULL, logged_at TEXT,
@@ -29,7 +33,15 @@ class DatabaseHelper {
 
     await db.execute('''CREATE TABLE transactions (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, amount REAL NOT NULL,
-      category TEXT NOT NULL, type TEXT NOT NULL, date TEXT NOT NULL)''');
+      category TEXT NOT NULL, type TEXT NOT NULL, date TEXT NOT NULL,
+      is_recurring INTEGER DEFAULT 0,
+      recurrence_pattern TEXT DEFAULT '',
+      sms_date TEXT)''');
+
+    await db.execute(
+        'CREATE INDEX idx_transactions_date ON transactions(date)');
+    await db.execute(
+        'CREATE INDEX idx_transactions_category ON transactions(category)');
 
     await db.execute('''CREATE TABLE step_records (
       date TEXT PRIMARY KEY, baseline INTEGER NOT NULL DEFAULT 0,
@@ -54,6 +66,11 @@ class DatabaseHelper {
     await db.execute('''CREATE TABLE daily_plans (
       date TEXT PRIMARY KEY, intention TEXT NOT NULL,
       committed_at TEXT NOT NULL)''');
+
+    await db.execute('''CREATE TABLE budget_limits (
+      category TEXT PRIMARY KEY,
+      limit_amount REAL NOT NULL,
+      alert_threshold REAL DEFAULT 0.8)''');
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -84,6 +101,28 @@ class DatabaseHelper {
       await db.execute('''CREATE TABLE IF NOT EXISTS daily_plans (
         date TEXT PRIMARY KEY, intention TEXT NOT NULL,
         committed_at TEXT NOT NULL)''');
+    }
+    if (oldVersion < 5) {
+      // habits: new metadata columns
+      try { await db.execute("ALTER TABLE habits ADD COLUMN category TEXT DEFAULT 'general'"); } catch (_) {}
+      try { await db.execute('ALTER TABLE habits ADD COLUMN difficulty INTEGER DEFAULT 1'); } catch (_) {}
+      try { await db.execute('ALTER TABLE habits ADD COLUMN is_active INTEGER DEFAULT 1'); } catch (_) {}
+      try { await db.execute("ALTER TABLE habits ADD COLUMN description TEXT DEFAULT ''"); } catch (_) {}
+
+      // transactions: recurring + SMS support
+      try { await db.execute('ALTER TABLE transactions ADD COLUMN is_recurring INTEGER DEFAULT 0'); } catch (_) {}
+      try { await db.execute("ALTER TABLE transactions ADD COLUMN recurrence_pattern TEXT DEFAULT ''"); } catch (_) {}
+      try { await db.execute('ALTER TABLE transactions ADD COLUMN sms_date TEXT'); } catch (_) {}
+
+      // indexes for transactions
+      try { await db.execute('CREATE INDEX idx_transactions_date ON transactions(date)'); } catch (_) {}
+      try { await db.execute('CREATE INDEX idx_transactions_category ON transactions(category)'); } catch (_) {}
+
+      // budget limits table
+      await db.execute('''CREATE TABLE IF NOT EXISTS budget_limits (
+        category TEXT PRIMARY KEY,
+        limit_amount REAL NOT NULL,
+        alert_threshold REAL DEFAULT 0.8)''');
     }
   }
 
@@ -180,6 +219,172 @@ class DatabaseHelper {
 
   Future<void> deleteTransaction(String id) async =>
       (await database).delete('transactions', where: 'id = ?', whereArgs: [id]);
+
+  Future<List<Map<String, dynamic>>> getExpensesByCategory(
+      String fromDate, String toDate) async {
+    final db = await database;
+    return db.rawQuery(
+      "SELECT category, SUM(amount) as total FROM transactions "
+      "WHERE type = 'expense' AND date BETWEEN ? AND ? "
+      "GROUP BY category ORDER BY total DESC",
+      [fromDate, toDate],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getTransactionsByDateRange(
+      String fromDate, String toDate) async {
+    final db = await database;
+    return db.rawQuery(
+      'SELECT * FROM transactions WHERE date BETWEEN ? AND ? ORDER BY date DESC',
+      [fromDate, toDate],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> searchTransactions(String term) async {
+    final db = await database;
+    return db.rawQuery(
+      "SELECT * FROM transactions WHERE title LIKE ? ORDER BY date DESC",
+      ['%$term%'],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getBudgetLimits() async =>
+      (await database).query('budget_limits');
+
+  Future<void> setBudgetLimit(String category, double limit,
+      {double threshold = 0.8}) async {
+    final db = await database;
+    await db.rawInsert(
+      'INSERT OR REPLACE INTO budget_limits (category, limit_amount, alert_threshold) VALUES (?, ?, ?)',
+      [category, limit, threshold],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getRecurringTransactions() async {
+    final db = await database;
+    return db.rawQuery(
+      'SELECT * FROM transactions WHERE is_recurring = 1',
+    );
+  }
+
+  Future<Map<String, dynamic>> getWaterStreak() async {
+    final db = await database;
+    // Fetch all dates and their total water intake, ordered ascending
+    final rows = await db.rawQuery(
+      'SELECT date, SUM(amount_ml) as total FROM water_logs GROUP BY date ORDER BY date ASC',
+    );
+
+    if (rows.isEmpty) return {'currentStreak': 0, 'longestStreak': 0};
+
+    // Build a set of dates that met the 2000ml goal
+    final goalDates = <DateTime>[];
+    for (final row in rows) {
+      final total = (row['total'] as num).toInt();
+      if (total >= 2000) {
+        final parts = (row['date'] as String).split('-');
+        goalDates.add(DateTime(
+            int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2])));
+      }
+    }
+
+    if (goalDates.isEmpty) return {'currentStreak': 0, 'longestStreak': 0};
+
+    goalDates.sort();
+
+    // Calculate longest streak
+    int longest = 1;
+    int current = 1;
+    for (int i = 1; i < goalDates.length; i++) {
+      if (goalDates[i].difference(goalDates[i - 1]).inDays == 1) {
+        current++;
+        if (current > longest) longest = current;
+      } else {
+        current = 1;
+      }
+    }
+
+    // Calculate current streak (streak ending today or yesterday)
+    final today = DateTime.now();
+    final todayNorm = DateTime(today.year, today.month, today.day);
+    int currentStreak = 0;
+    DateTime checkDate = todayNorm;
+
+    // Allow streak to include today or yesterday as the most recent entry
+    if (goalDates.last == todayNorm ||
+        goalDates.last == todayNorm.subtract(const Duration(days: 1))) {
+      checkDate = goalDates.last;
+      currentStreak = 1;
+      for (int i = goalDates.length - 2; i >= 0; i--) {
+        if (checkDate.difference(goalDates[i]).inDays == 1) {
+          currentStreak++;
+          checkDate = goalDates[i];
+        } else {
+          break;
+        }
+      }
+    }
+
+    return {'currentStreak': currentStreak, 'longestStreak': longest};
+  }
+
+  Future<Map<String, dynamic>> getStepStreak(int goal) async {
+    final db = await database;
+    // Fetch all step records ordered ascending
+    final rows = await db.rawQuery(
+      'SELECT date, steps FROM step_records ORDER BY date ASC',
+    );
+
+    if (rows.isEmpty) return {'currentStreak': 0, 'longestStreak': 0};
+
+    // Build list of dates that met the goal
+    final goalDates = <DateTime>[];
+    for (final row in rows) {
+      final steps = (row['steps'] as num).toInt();
+      if (steps >= goal) {
+        final parts = (row['date'] as String).split('-');
+        goalDates.add(DateTime(
+            int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2])));
+      }
+    }
+
+    if (goalDates.isEmpty) return {'currentStreak': 0, 'longestStreak': 0};
+
+    goalDates.sort();
+
+    // Calculate longest streak
+    int longest = 1;
+    int current = 1;
+    for (int i = 1; i < goalDates.length; i++) {
+      if (goalDates[i].difference(goalDates[i - 1]).inDays == 1) {
+        current++;
+        if (current > longest) longest = current;
+      } else {
+        current = 1;
+      }
+    }
+
+    // Calculate current streak
+    final today = DateTime.now();
+    final todayNorm = DateTime(today.year, today.month, today.day);
+    int currentStreak = 0;
+    DateTime checkDate = todayNorm;
+
+    if (goalDates.last == todayNorm ||
+        goalDates.last == todayNorm.subtract(const Duration(days: 1))) {
+      checkDate = goalDates.last;
+      currentStreak = 1;
+      for (int i = goalDates.length - 2; i >= 0; i--) {
+        if (checkDate.difference(goalDates[i]).inDays == 1) {
+          currentStreak++;
+          checkDate = goalDates[i];
+        } else {
+          break;
+        }
+      }
+    }
+
+    return {'currentStreak': currentStreak, 'longestStreak': longest};
+  }
 
   // ── Steps ────────────────────────────────────────────────────────────────
 

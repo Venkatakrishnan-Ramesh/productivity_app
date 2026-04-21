@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 
@@ -24,6 +25,65 @@ class NotificationService {
     const ios = DarwinInitializationSettings();
     await _plugin.initialize(const InitializationSettings(android: android, iOS: ios));
     await _createChannels();
+    await rescheduleFromPrefs();
+  }
+
+  /// Reads all notification-related SharedPreferences and schedules or cancels
+  /// each notification accordingly.
+  Future<void> rescheduleFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Morning briefing
+    final morningOn = prefs.getBool('notif_morning') ?? true;
+    final morningHour = prefs.getInt('notif_morning_hour') ?? 7;
+    if (morningOn) {
+      await scheduleMorningBriefing(hour: morningHour);
+    } else {
+      await cancelMorningBriefing();
+    }
+
+    // Evening recap
+    final eveningOn = prefs.getBool('notif_evening') ?? true;
+    final eveningHour = prefs.getInt('notif_evening_hour') ?? 22;
+    if (eveningOn) {
+      await scheduleEveningRecap(hour: eveningHour);
+    } else {
+      await cancelEveningRecap();
+    }
+
+    // Daily check-in
+    final checkinOn = prefs.getBool('notif_checkin') ?? true;
+    final checkinHour = prefs.getInt('notif_checkin_hour') ?? 20;
+    if (checkinOn) {
+      await scheduleDailyCheckin(hour: checkinHour);
+    } else {
+      await cancelDailyCheckin();
+    }
+
+    // Water reminders
+    final waterOn = prefs.getBool('notif_water') ?? true;
+    if (waterOn) {
+      await scheduleWaterReminders();
+    } else {
+      await cancelWaterReminders();
+    }
+
+    // Finance reminder
+    final financeOn = prefs.getBool('notif_finance') ?? true;
+    final financeHour = prefs.getInt('notif_finance_hour') ?? 21;
+    if (financeOn) {
+      await scheduleFinanceSummary(hour: financeHour);
+    } else {
+      await cancelFinanceSummary();
+    }
+
+    // Bedtime reminder
+    final bedtimeOn = prefs.getBool('notif_bedtime') ?? true;
+    if (bedtimeOn) {
+      await scheduleBedtimeReminder();
+    } else {
+      await cancelBedtimeReminder();
+    }
   }
 
   Future<void> requestPermission() async {
@@ -400,6 +460,30 @@ class NotificationService {
 
   Future<void> cancelReminder(int id) async => _plugin.cancel(id);
   Future<void> cancelAll() async => _plugin.cancelAll();
+
+  // ── Typed cancel helpers ──────────────────────────────────────────────────
+
+  /// Cancel morning briefing (ID 1001)
+  Future<void> cancelMorningBriefing() => cancelReminder(1001);
+
+  /// Cancel evening recap (ID 1002)
+  Future<void> cancelEveningRecap() => cancelReminder(1002);
+
+  /// Cancel daily check-in (ID 1010)
+  Future<void> cancelDailyCheckin() => cancelReminder(1010);
+
+  /// Cancel all seven water reminder slots (IDs 2000–2006)
+  Future<void> cancelWaterReminders() async {
+    for (int i = 0; i < 7; i++) {
+      await cancelReminder(2000 + i);
+    }
+  }
+
+  /// Cancel finance summary (ID 1020)
+  Future<void> cancelFinanceSummary() => cancelReminder(1020);
+
+  /// Cancel bedtime reminder (ID 1003)
+  Future<void> cancelBedtimeReminder() => cancelReminder(1003);
 
   static const _waterMessages = [
     'Start your morning right — drink a glass of water!',

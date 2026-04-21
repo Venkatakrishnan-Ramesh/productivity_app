@@ -16,6 +16,15 @@ class ParsedTransaction {
     required this.category,
     required this.date,
   });
+
+  String get stableId {
+    final day =
+        '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final normalizedTitle =
+        title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final normalizedAmount = amount.toStringAsFixed(2);
+    return 'sms_${day}_${type}_${normalizedAmount}_$normalizedTitle';
+  }
 }
 
 class SmsService {
@@ -33,6 +42,15 @@ class SmsService {
     final status = await Permission.sms.request();
     return status.isGranted;
   }
+
+  static Future<bool> hasPermission() async {
+    final status = await Permission.sms.status;
+    return status.isGranted;
+  }
+
+  static Future<PermissionStatus> permissionStatus() => Permission.sms.status;
+
+  static Future<bool> openSettings() => openAppSettings();
 
   static Future<List<ParsedTransaction>> fetchGPayTransactions() async {
     final query = SmsQuery();
@@ -95,7 +113,10 @@ class SmsService {
       caseSensitive: false,
     ).firstMatch(body);
     if (vpaMatch != null) {
-      return vpaMatch.group(1)!.split('@').first
+      return vpaMatch
+          .group(1)!
+          .split('@')
+          .first
           .replaceAll(RegExp(r'[.\-_]'), ' ')
           .trim()
           .toUpperCase();
@@ -120,12 +141,33 @@ class SmsService {
 
   static String _guessCategory(String body) {
     final lower = body.toLowerCase();
-    if (lower.contains('swiggy') || lower.contains('zomato') || lower.contains('food') || lower.contains('restaurant')) return 'Food';
-    if (lower.contains('uber') || lower.contains('ola') || lower.contains('rapido') || lower.contains('metro') || lower.contains('petrol') || lower.contains('fuel')) return 'Transport';
-    if (lower.contains('amazon') || lower.contains('flipkart') || lower.contains('myntra') || lower.contains('shop')) return 'Shopping';
-    if (lower.contains('netflix') || lower.contains('spotify') || lower.contains('prime') || lower.contains('hotstar')) return 'Entertainment';
-    if (lower.contains('electricity') || lower.contains('water') || lower.contains('gas') || lower.contains('rent') || lower.contains('broadband')) return 'Bills';
-    if (lower.contains('hospital') || lower.contains('pharmacy') || lower.contains('medical') || lower.contains('doctor')) return 'Health';
+    if (lower.contains('swiggy') ||
+        lower.contains('zomato') ||
+        lower.contains('food') ||
+        lower.contains('restaurant')) return 'Food';
+    if (lower.contains('uber') ||
+        lower.contains('ola') ||
+        lower.contains('rapido') ||
+        lower.contains('metro') ||
+        lower.contains('petrol') ||
+        lower.contains('fuel')) return 'Transport';
+    if (lower.contains('amazon') ||
+        lower.contains('flipkart') ||
+        lower.contains('myntra') ||
+        lower.contains('shop')) return 'Shopping';
+    if (lower.contains('netflix') ||
+        lower.contains('spotify') ||
+        lower.contains('prime') ||
+        lower.contains('hotstar')) return 'Entertainment';
+    if (lower.contains('electricity') ||
+        lower.contains('water') ||
+        lower.contains('gas') ||
+        lower.contains('rent') ||
+        lower.contains('broadband')) return 'Bills';
+    if (lower.contains('hospital') ||
+        lower.contains('pharmacy') ||
+        lower.contains('medical') ||
+        lower.contains('doctor')) return 'Health';
     return 'UPI';
   }
 }
