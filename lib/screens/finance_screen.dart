@@ -221,7 +221,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   controller: amountCtrl,
                   decoration: const InputDecoration(
                       labelText: 'Amount',
-                      prefixText: '\$ ',
+                      prefixText: '₹ ',
                       border: OutlineInputBorder()),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
@@ -606,7 +606,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                     child: TextField(
                                       controller: controller,
                                       decoration: const InputDecoration(
-                                        prefixText: '\$ ',
+                                        prefixText: '₹ ',
                                         labelText: 'Limit',
                                         isDense: true,
                                         border: OutlineInputBorder(),
@@ -770,7 +770,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 const SizedBox(height: 4),
                 Text('Balance', style: Theme.of(context).textTheme.titleMedium),
                 Text(
-                  '\$${fmt.format(balance)}',
+                  '₹${fmt.format(balance)}',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: balance >= 0
@@ -784,14 +784,14 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   children: [
                     _SummaryChip(
                       label: 'Income',
-                      value: '\$${fmt.format(totalIncome)}',
+                      value: '₹${fmt.format(totalIncome)}',
                       color: Colors.green,
                       icon: Icons.arrow_downward,
                     ),
                     const SizedBox(width: 20),
                     _SummaryChip(
                       label: 'Expenses',
-                      value: '\$${fmt.format(totalExpense)}',
+                      value: '₹${fmt.format(totalExpense)}',
                       color: Colors.red,
                       icon: Icons.arrow_upward,
                     ),

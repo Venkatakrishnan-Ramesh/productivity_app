@@ -95,7 +95,7 @@ class SmsService {
 
     final type = isDebit ? 'expense' : 'income';
     final title = _extractTitle(body);
-    final category = isDebit ? _guessCategory(body) : 'UPI Income';
+    final category = isDebit ? _guessCategory(body) : 'Other';
 
     return ParsedTransaction(
       title: title,
@@ -168,6 +168,6 @@ class SmsService {
         lower.contains('pharmacy') ||
         lower.contains('medical') ||
         lower.contains('doctor')) return 'Health';
-    return 'UPI';
+    return 'Other';
   }
 }
