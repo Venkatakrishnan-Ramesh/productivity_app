@@ -1,6 +1,28 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
+String normalizeDateKey(dynamic value) {
+  if (value is DateTime) {
+    return value.toIso8601String().split('T').first;
+  }
+  final text = value?.toString() ?? '';
+  if (text.isEmpty) return text;
+  return text.length >= 10 ? text.substring(0, 10) : text;
+}
+
+Map<String, dynamic> normalizeTransactionRecord(Map<String, dynamic> txn) {
+  final normalized = Map<String, dynamic>.from(txn);
+  normalized['date'] = normalizeDateKey(normalized['date']);
+  if (normalized['sms_date'] != null) {
+    normalized['sms_date'] = normalizeDateKey(normalized['sms_date']);
+  }
+  final amount = normalized['amount'];
+  if (amount is int) {
+    normalized['amount'] = amount.toDouble();
+  }
+  return normalized;
+}
+
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
@@ -15,7 +37,7 @@ class DatabaseHelper {
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
-    return await openDatabase(path, version: 5, onCreate: _createDB, onUpgrade: _upgradeDB);
+    return await openDatabase(path, version: 6, onCreate: _createDB, onUpgrade: _upgradeDB);
   }
 
   Future _createDB(Database db, int version) async {
@@ -71,6 +93,68 @@ class DatabaseHelper {
       category TEXT PRIMARY KEY,
       limit_amount REAL NOT NULL,
       alert_threshold REAL DEFAULT 0.8)''');
+
+    await _createWorkoutTables(db);
+  }
+
+  Future<void> _createWorkoutTables(Database db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS workout_plans (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'appSuggested',
+      workouts_per_week INTEGER NOT NULL DEFAULT 4,
+      cardio_per_week INTEGER NOT NULL DEFAULT 3,
+      step_target INTEGER NOT NULL DEFAULT 10000,
+      created_at TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1)''');
+
+    await db.execute('''CREATE TABLE IF NOT EXISTS workout_days (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      day_name TEXT NOT NULL,
+      focus TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (plan_id) REFERENCES workout_plans(id) ON DELETE CASCADE)''');
+
+    await db.execute('''CREATE TABLE IF NOT EXISTS exercises (
+      id TEXT PRIMARY KEY,
+      day_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      sets INTEGER NOT NULL DEFAULT 3,
+      reps TEXT NOT NULL DEFAULT '8-12',
+      weight_kg REAL,
+      rest_seconds INTEGER DEFAULT 60,
+      notes TEXT DEFAULT '',
+      target_muscle TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (day_id) REFERENCES workout_days(id) ON DELETE CASCADE)''');
+
+    await db.execute('''CREATE TABLE IF NOT EXISTS workout_logs (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      day_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      completed_at TEXT,
+      notes TEXT DEFAULT '',
+      is_completed INTEGER NOT NULL DEFAULT 1)''');
+
+    await db.execute('''CREATE TABLE IF NOT EXISTS trainer_notes (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL DEFAULT 'general',
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      next_review_date TEXT)''');
+
+    await db.execute('''CREATE TABLE IF NOT EXISTS weekly_checkins (
+      id TEXT PRIMARY KEY,
+      week_start TEXT NOT NULL UNIQUE,
+      weight_kg REAL,
+      waist_cm REAL,
+      energy_level INTEGER,
+      workouts_completed INTEGER DEFAULT 0,
+      cardio_completed INTEGER DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL)''');
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -123,6 +207,9 @@ class DatabaseHelper {
         category TEXT PRIMARY KEY,
         limit_amount REAL NOT NULL,
         alert_threshold REAL DEFAULT 0.8)''');
+    }
+    if (oldVersion < 6) {
+      await _createWorkoutTables(db);
     }
   }
 
@@ -207,14 +294,14 @@ class DatabaseHelper {
   // ── Transactions ─────────────────────────────────────────────────────────
 
   Future<void> insertTransaction(Map<String, dynamic> txn) async =>
-      (await database).insert('transactions', txn,
+      (await database).insert('transactions', normalizeTransactionRecord(txn),
           conflictAlgorithm: ConflictAlgorithm.replace);
 
   Future<List<Map<String, dynamic>>> getTransactions() async =>
       (await database).query('transactions', orderBy: 'date DESC');
 
   Future<void> updateTransaction(Map<String, dynamic> txn) async =>
-      (await database).update('transactions', txn,
+      (await database).update('transactions', normalizeTransactionRecord(txn),
           where: 'id = ?', whereArgs: [txn['id']]);
 
   Future<void> deleteTransaction(String id) async =>
@@ -225,9 +312,9 @@ class DatabaseHelper {
     final db = await database;
     return db.rawQuery(
       "SELECT category, SUM(amount) as total FROM transactions "
-      "WHERE type = 'expense' AND date BETWEEN ? AND ? "
+      "WHERE type = 'expense' AND substr(date, 1, 10) BETWEEN ? AND ? "
       "GROUP BY category ORDER BY total DESC",
-      [fromDate, toDate],
+      [normalizeDateKey(fromDate), normalizeDateKey(toDate)],
     );
   }
 
@@ -235,8 +322,10 @@ class DatabaseHelper {
       String fromDate, String toDate) async {
     final db = await database;
     return db.rawQuery(
-      'SELECT * FROM transactions WHERE date BETWEEN ? AND ? ORDER BY date DESC',
-      [fromDate, toDate],
+      'SELECT * FROM transactions '
+      'WHERE substr(date, 1, 10) BETWEEN ? AND ? '
+      'ORDER BY date DESC',
+      [normalizeDateKey(fromDate), normalizeDateKey(toDate)],
     );
   }
 
@@ -470,4 +559,122 @@ class DatabaseHelper {
 
   Future<void> deleteTodo(String id) async =>
       (await database).delete('todos', where: 'id = ?', whereArgs: [id]);
+
+  // ── Workout Plans ────────────────────────────────────────────────────────
+
+  Future<void> insertWorkoutPlan(Map<String, dynamic> plan) async =>
+      (await database).insert('workout_plans', plan,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+
+  Future<List<Map<String, dynamic>>> getWorkoutPlans() async =>
+      (await database).query('workout_plans', orderBy: 'created_at DESC');
+
+  Future<Map<String, dynamic>?> getActiveWorkoutPlan() async {
+    final rows = await (await database)
+        .query('workout_plans', where: 'is_active = 1', limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<void> setActivePlan(String id) async {
+    final db = await database;
+    await db.update('workout_plans', {'is_active': 0});
+    await db.update('workout_plans', {'is_active': 1},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> deleteWorkoutPlan(String id) async =>
+      (await database).delete('workout_plans', where: 'id = ?', whereArgs: [id]);
+
+  // ── Workout Days ─────────────────────────────────────────────────────────
+
+  Future<void> insertWorkoutDay(Map<String, dynamic> day) async =>
+      (await database).insert('workout_days', day,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+
+  Future<List<Map<String, dynamic>>> getWorkoutDays(String planId) async =>
+      (await database).query('workout_days',
+          where: 'plan_id = ?', whereArgs: [planId], orderBy: 'sort_order ASC');
+
+  Future<void> updateWorkoutDay(Map<String, dynamic> day) async =>
+      (await database).update('workout_days', day,
+          where: 'id = ?', whereArgs: [day['id']]);
+
+  Future<void> deleteWorkoutDay(String id) async =>
+      (await database).delete('workout_days', where: 'id = ?', whereArgs: [id]);
+
+  // ── Exercises ────────────────────────────────────────────────────────────
+
+  Future<void> insertExercise(Map<String, dynamic> exercise) async =>
+      (await database).insert('exercises', exercise,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+
+  Future<List<Map<String, dynamic>>> getExercises(String dayId) async =>
+      (await database).query('exercises',
+          where: 'day_id = ?', whereArgs: [dayId], orderBy: 'sort_order ASC');
+
+  Future<void> updateExercise(Map<String, dynamic> exercise) async =>
+      (await database).update('exercises', exercise,
+          where: 'id = ?', whereArgs: [exercise['id']]);
+
+  Future<void> deleteExercise(String id) async =>
+      (await database).delete('exercises', where: 'id = ?', whereArgs: [id]);
+
+  // ── Workout Logs ─────────────────────────────────────────────────────────
+
+  Future<void> insertWorkoutLog(Map<String, dynamic> log) async =>
+      (await database).insert('workout_logs', log,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+
+  Future<bool> isWorkoutLoggedToday(String dayId, String date) async =>
+      ((await database).query('workout_logs',
+              where: 'day_id = ? AND date = ? AND is_completed = 1',
+              whereArgs: [dayId, date]))
+          .then((r) => r.isNotEmpty);
+
+  Future<List<Map<String, dynamic>>> getWorkoutLogsForRange(
+          String from, String to) async =>
+      (await database).rawQuery(
+          'SELECT * FROM workout_logs WHERE date >= ? AND date <= ? AND is_completed = 1 ORDER BY date DESC',
+          [from, to]);
+
+  Future<int> countWorkoutsForRange(String from, String to) async {
+    final rows = await getWorkoutLogsForRange(from, to);
+    return rows.length;
+  }
+
+  Future<void> deleteWorkoutLog(String dayId, String date) async =>
+      (await database).delete('workout_logs',
+          where: 'day_id = ? AND date = ?', whereArgs: [dayId, date]);
+
+  // ── Trainer Notes ────────────────────────────────────────────────────────
+
+  Future<void> insertTrainerNote(Map<String, dynamic> note) async =>
+      (await database).insert('trainer_notes', note,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+
+  Future<List<Map<String, dynamic>>> getTrainerNotes() async =>
+      (await database).query('trainer_notes', orderBy: 'category ASC, created_at DESC');
+
+  Future<void> updateTrainerNote(Map<String, dynamic> note) async =>
+      (await database).update('trainer_notes', note,
+          where: 'id = ?', whereArgs: [note['id']]);
+
+  Future<void> deleteTrainerNote(String id) async =>
+      (await database).delete('trainer_notes', where: 'id = ?', whereArgs: [id]);
+
+  // ── Weekly Check-ins ─────────────────────────────────────────────────────
+
+  Future<void> upsertWeeklyCheckIn(Map<String, dynamic> checkin) async =>
+      (await database).insert('weekly_checkins', checkin,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+
+  Future<Map<String, dynamic>?> getCheckInForWeek(String weekStart) async {
+    final rows = await (await database)
+        .query('weekly_checkins', where: 'week_start = ?', whereArgs: [weekStart]);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getWeeklyCheckIns({int limit = 12}) async =>
+      (await database).query('weekly_checkins',
+          orderBy: 'week_start DESC', limit: limit);
 }

@@ -9,6 +9,7 @@ import 'screens/settings_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/steps_screen.dart';
 import 'screens/water_screen.dart';
+import 'screens/workout_screen.dart';
 import 'services/notification_service.dart';
 import 'services/step_service.dart';
 
@@ -103,7 +104,8 @@ class _MainNavState extends State<MainNav> {
     'Mission Control',
     'Missions',
     'Finance',
-    'Insights'
+    'Insights',
+    'Training',
   ];
 
   @override
@@ -153,6 +155,7 @@ class _MainNavState extends State<MainNav> {
           HabitScreen(),
           FinanceScreen(),
           InsightsScreen(),
+          WorkoutScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -183,6 +186,11 @@ class _MainNavState extends State<MainNav> {
             icon: Icon(Icons.insights_outlined),
             selectedIcon: Icon(Icons.insights),
             label: 'Insights',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.fitness_center_outlined),
+            selectedIcon: Icon(Icons.fitness_center),
+            label: 'Training',
           ),
         ],
       ),
