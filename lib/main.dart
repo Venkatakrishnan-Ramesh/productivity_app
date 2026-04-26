@@ -12,6 +12,7 @@ import 'screens/water_screen.dart';
 import 'screens/workout_screen.dart';
 import 'services/notification_service.dart';
 import 'services/step_service.dart';
+import 'services/sms_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +32,10 @@ void main() async {
 
   try {
     await StepService.instance.init();
+  } catch (_) {}
+
+  try {
+    await SmsService.requestPermission();
   } catch (_) {}
 
   runApp(ProductivityApp(initialThemeDark: savedThemeDark));
