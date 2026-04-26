@@ -31,12 +31,22 @@ jobs:
       - name: Run tests
         run: flutter test
 
+      - name: Build debug APK
+        run: flutter build apk --debug --split-per-abi
+
       - name: Build release APK (split by ABI)
         run: flutter build apk --release --split-per-abi
         env:
           KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || 'productivityapp123' }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'productivityapp123' }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
+
+      - name: Upload debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: LifeOS-debug-apks
+          path: build/app/outputs/apk/debug/*.apk
+          retention-days: 30
 
       - name: Upload release APKs
         uses: actions/upload-artifact@v4
