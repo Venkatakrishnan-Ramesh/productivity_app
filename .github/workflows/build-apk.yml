@@ -1,4 +1,4 @@
-name: Build Debug APK
+name: Build APK
 
 on:
   push:
@@ -31,12 +31,16 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      - name: Build debug APK
-        run: flutter build apk --debug
+      - name: Build release APK (split by ABI)
+        run: flutter build apk --release --split-per-abi
+        env:
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || 'productivityapp123' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'productivityapp123' }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
 
-      - name: Upload debug APK
+      - name: Upload release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: productivity-app-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: LifeOS-release-apks
+          path: build/app/outputs/apk/release/*.apk
           retention-days: 30
