@@ -90,12 +90,11 @@ class SmsService {
 
     final lower = body.toLowerCase();
     final isDebit = lower.contains('debited') || lower.contains('debit');
-    final isCredit = lower.contains('credited') || lower.contains('credit');
-    if (!isDebit && !isCredit) return null;
+    if (!isDebit) return null; // only import expense/debit transactions
 
-    final type = isDebit ? 'expense' : 'income';
+    final type = 'expense';
     final title = _extractTitle(body);
-    final category = isDebit ? _guessCategory(body) : 'Other';
+    final category = _guessCategory(body);
 
     return ParsedTransaction(
       title: title,
