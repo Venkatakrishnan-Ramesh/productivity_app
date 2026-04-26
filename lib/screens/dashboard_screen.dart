@@ -160,16 +160,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (!mounted) return;
     setState(() {
       habits = loadedHabits;
-      transactions = txMaps
-          .map((m) => FinanceTransaction(
-                id: m['id'],
-                title: m['title'],
-                amount: m['amount'],
-                category: m['category'],
-                type: m['type'],
-                date: m['date'],
-              ))
-          .toList();
+      transactions = txMaps.map(FinanceTransaction.fromMap).toList();
       _waterMl = waterMl;
       _lifeScore = score;
       _totalXp = totalXp;

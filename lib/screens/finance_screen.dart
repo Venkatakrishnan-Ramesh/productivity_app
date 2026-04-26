@@ -73,19 +73,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
 
   Future<void> _loadTransactions() async {
     final maps = await db.getTransactions();
-    final list = maps
-        .map((m) => FinanceTransaction(
-              id: m['id'],
-              title: m['title'],
-              amount: m['amount'],
-              category: m['category'],
-              type: m['type'],
-              date: m['date'],
-              isRecurring: ((m['is_recurring'] as int?) ?? 0) == 1,
-              recurrencePattern: (m['recurrence_pattern'] as String?) ?? '',
-              smsDate: m['sms_date'] as String?,
-            ))
-        .toList();
+    final list = maps.map(FinanceTransaction.fromMap).toList();
 
     // Previous month expense (calculated from full list)
     final prevMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
